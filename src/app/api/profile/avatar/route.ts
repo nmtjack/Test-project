@@ -1,5 +1,3 @@
-import { mkdir, writeFile } from "node:fs/promises";
-import path from "node:path";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/session";
@@ -21,17 +19,12 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Upload a PNG, JPEG, WEBP, or GIF image." }, { status: 400 });
   }
 
-  if (file.size > 2_000_000) {
-    return NextResponse.json({ error: "Avatar must be smaller than 2 MB." }, { status: 400 });
+  if (file.size > 500_000) {
+    return NextResponse.json({ error: "Avatar must be smaller than 500 KB for this MVP." }, { status: 400 });
   }
 
-  const extension = file.type.split("/")[1]?.replace("jpeg", "jpg") ?? "png";
-  const uploadDir = path.join(process.cwd(), "public", "uploads", "avatars");
-  await mkdir(uploadDir, { recursive: true });
-  const filename = `${user.id}-${Date.now()}.${extension}`;
-  await writeFile(path.join(uploadDir, filename), Buffer.from(await file.arrayBuffer()));
-
-  const avatarUrl = `/uploads/avatars/${filename}`;
+  const base64 = Buffer.from(await file.arrayBuffer()).toString("base64");
+  const avatarUrl = `data:${file.type};base64,${base64}`;
   await prisma.user.update({
     where: { id: user.id },
     data: { avatarUrl, image: avatarUrl },
