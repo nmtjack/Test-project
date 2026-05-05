@@ -18,7 +18,31 @@ export async function GET() {
     orderBy: { updatedAt: "desc" },
   });
 
-  const friends = friendships.map((friendship) => (friendship.requesterId === user.id ? friendship.addressee : friendship.requester));
+  const friendsById = new Map<string, (typeof friendships)[number]["requester"]>();
+  friendships.forEach((friendship) => {
+    const friend = friendship.requesterId === user.id ? friendship.addressee : friendship.requester;
+    friendsById.set(friend.id, friend);
+  });
 
-  return NextResponse.json({ friends });
+  const incomingRequests = await prisma.friendship.findMany({
+    where: { addresseeId: user.id, status: "PENDING" },
+    include: {
+      requester: { select: { id: true, name: true, username: true, tag: true, image: true, avatarUrl: true, accessLevel: true } },
+    },
+    orderBy: { createdAt: "desc" },
+  });
+
+  const outgoingRequests = await prisma.friendship.findMany({
+    where: { requesterId: user.id, status: "PENDING" },
+    include: {
+      addressee: { select: { id: true, name: true, username: true, tag: true, image: true, avatarUrl: true, accessLevel: true } },
+    },
+    orderBy: { createdAt: "desc" },
+  });
+
+  return NextResponse.json({
+    friends: Array.from(friendsById.values()),
+    incomingRequests: incomingRequests.map((request) => ({ id: request.id, user: request.requester })),
+    outgoingRequests: outgoingRequests.map((request) => ({ id: request.id, user: request.addressee })),
+  });
 }

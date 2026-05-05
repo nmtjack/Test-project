@@ -2,7 +2,7 @@
 
 import Image from "next/image";
 import { useEffect, useState } from "react";
-import { Search, UserPlus } from "lucide-react";
+import { Check, Search, UserPlus, X } from "lucide-react";
 import { readPlannerTheme } from "@/lib/planner-theme";
 
 type SearchUser = {
@@ -15,11 +15,18 @@ type SearchUser = {
   accessLevel: string;
 };
 
+type FriendRequest = {
+  id: string;
+  user: SearchUser;
+};
+
 export function SocialClient({ handle, accountId }: { handle: string; accountId: string }) {
   const [theme] = useState(() => readPlannerTheme(accountId));
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<SearchUser[]>([]);
   const [friends, setFriends] = useState<SearchUser[]>([]);
+  const [incomingRequests, setIncomingRequests] = useState<FriendRequest[]>([]);
+  const [outgoingRequests, setOutgoingRequests] = useState<FriendRequest[]>([]);
   const [status, setStatus] = useState("");
   const [isSearching, setIsSearching] = useState(false);
 
@@ -29,9 +36,17 @@ export function SocialClient({ handle, accountId }: { handle: string; accountId:
       try {
         const response = await fetch("/api/friends");
         const payload = await response.json();
-        if (!cancelled) setFriends(payload.friends ?? []);
+        if (!cancelled) {
+          setFriends(payload.friends ?? []);
+          setIncomingRequests(payload.incomingRequests ?? []);
+          setOutgoingRequests(payload.outgoingRequests ?? []);
+        }
       } catch {
-        if (!cancelled) setFriends([]);
+        if (!cancelled) {
+          setFriends([]);
+          setIncomingRequests([]);
+          setOutgoingRequests([]);
+        }
       }
     }
     void loadFriends();
@@ -81,11 +96,32 @@ export function SocialClient({ handle, accountId }: { handle: string; accountId:
       body: JSON.stringify({ targetUserId }),
     });
     const payload = await response.json();
-    setStatus(response.ok ? "Friend request sent." : payload.error);
+    setStatus(response.ok ? payload.status === "ACCEPTED" ? "You are already friends." : "Friend request sent. Waiting for acceptance." : payload.error);
     if (response.ok) {
       const friend = results.find((item) => item.id === targetUserId);
-      if (friend && !friends.some((item) => item.id === friend.id)) setFriends((current) => [friend, ...current]);
+      if (friend && payload.status !== "ACCEPTED" && !outgoingRequests.some((item) => item.user.id === friend.id)) {
+        setOutgoingRequests((current) => [{ id: payload.friendship.id, user: friend }, ...current]);
+      }
     }
+  }
+
+  async function respondToRequest(friendshipId: string, action: "accept" | "decline") {
+    const response = await fetch("/api/friends/request", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ friendshipId, action }),
+    });
+    const payload = await response.json();
+    if (!response.ok) {
+      setStatus(payload.error ?? "Could not update request.");
+      return;
+    }
+    const request = incomingRequests.find((item) => item.id === friendshipId);
+    setIncomingRequests((current) => current.filter((item) => item.id !== friendshipId));
+    if (action === "accept" && request && !friends.some((item) => item.id === request.user.id)) {
+      setFriends((current) => [request.user, ...current]);
+    }
+    setStatus(action === "accept" ? "Friend request accepted." : "Friend request declined.");
   }
 
   return (
@@ -125,9 +161,15 @@ export function SocialClient({ handle, accountId }: { handle: string; accountId:
                       <p className="truncate text-sm font-bold" style={{ color: theme.muted }}>{user.name ?? "Level-Up Planner user"}</p>
                     </div>
                   </div>
-                  <button type="button" onClick={() => addFriend(user.id)} className="inline-flex h-10 shrink-0 items-center gap-2 rounded-md px-3 text-xs font-black text-white" style={{ background: theme.inverse }}>
+                  <button
+                    type="button"
+                    onClick={() => addFriend(user.id)}
+                    disabled={friends.some((item) => item.id === user.id) || outgoingRequests.some((item) => item.user.id === user.id)}
+                    className="inline-flex h-10 shrink-0 items-center gap-2 rounded-md px-3 text-xs font-black text-white disabled:cursor-not-allowed disabled:opacity-55"
+                    style={{ background: theme.inverse }}
+                  >
                     <UserPlus className="h-4 w-4" />
-                    Add
+                    {friends.some((item) => item.id === user.id) ? "Friends" : outgoingRequests.some((item) => item.user.id === user.id) ? "Pending" : "Request"}
                   </button>
                 </article>
               );
@@ -138,6 +180,54 @@ export function SocialClient({ handle, accountId }: { handle: string; accountId:
               </div>
             ) : null}
             {isSearching ? <p className="text-sm font-bold" style={{ color: theme.muted }}>Searching...</p> : null}
+          </div>
+        </section>
+
+        <section className="grid gap-6 lg:grid-cols-2">
+          <div className="rounded-lg border p-5 shadow-sm" style={{ borderColor: theme.line, background: theme.panel }}>
+            <p className="text-sm font-black uppercase tracking-[0.16em]" style={{ color: theme.accent }}>Friend requests</p>
+            <h2 className="mt-1 text-2xl font-black">Needs your response</h2>
+            <div className="mt-4 space-y-3">
+              {incomingRequests.map((request) => {
+                const avatar = request.user.avatarUrl ?? request.user.image;
+                return (
+                  <article key={request.id} className="flex items-center justify-between gap-3 rounded-lg border p-3" style={{ borderColor: theme.line, background: theme.soft }}>
+                    <div className="flex min-w-0 items-center gap-3">
+                      <div className="relative h-11 w-11 shrink-0 overflow-hidden rounded-lg" style={{ background: theme.panel }}>{avatar ? <Image src={avatar} alt="" fill className="object-cover" /> : null}</div>
+                      <div className="min-w-0">
+                        <p className="truncate font-black">{request.user.username}#{request.user.tag}</p>
+                        <p className="truncate text-xs font-bold" style={{ color: theme.muted }}>{request.user.name ?? "Planner user"}</p>
+                      </div>
+                    </div>
+                    <div className="flex gap-2">
+                      <button type="button" onClick={() => respondToRequest(request.id, "accept")} className="grid h-9 w-9 place-items-center rounded-md text-white" style={{ background: theme.accent2 }} title="Accept"><Check className="h-4 w-4" /></button>
+                      <button type="button" onClick={() => respondToRequest(request.id, "decline")} className="grid h-9 w-9 place-items-center rounded-md text-white" style={{ background: theme.inverse }} title="Decline"><X className="h-4 w-4" /></button>
+                    </div>
+                  </article>
+                );
+              })}
+              {incomingRequests.length === 0 ? <p className="rounded-lg border border-dashed p-5 text-sm font-bold" style={{ borderColor: theme.line, color: theme.muted }}>No pending requests.</p> : null}
+            </div>
+          </div>
+
+          <div className="rounded-lg border p-5 shadow-sm" style={{ borderColor: theme.line, background: theme.panel }}>
+            <p className="text-sm font-black uppercase tracking-[0.16em]" style={{ color: theme.accent }}>Sent requests</p>
+            <h2 className="mt-1 text-2xl font-black">Waiting for acceptance</h2>
+            <div className="mt-4 space-y-3">
+              {outgoingRequests.map((request) => {
+                const avatar = request.user.avatarUrl ?? request.user.image;
+                return (
+                  <article key={request.id} className="flex items-center gap-3 rounded-lg border p-3" style={{ borderColor: theme.line, background: theme.soft }}>
+                    <div className="relative h-11 w-11 shrink-0 overflow-hidden rounded-lg" style={{ background: theme.panel }}>{avatar ? <Image src={avatar} alt="" fill className="object-cover" /> : null}</div>
+                    <div className="min-w-0">
+                      <p className="truncate font-black">{request.user.username}#{request.user.tag}</p>
+                      <p className="text-xs font-bold" style={{ color: theme.muted }}>Pending</p>
+                    </div>
+                  </article>
+                );
+              })}
+              {outgoingRequests.length === 0 ? <p className="rounded-lg border border-dashed p-5 text-sm font-bold" style={{ borderColor: theme.line, color: theme.muted }}>No sent requests waiting.</p> : null}
+            </div>
           </div>
         </section>
 

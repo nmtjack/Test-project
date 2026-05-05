@@ -41,7 +41,7 @@ type Tab = "dashboard" | "planner" | "coop" | "tracking";
 type ThemePreset = "fantasy" | "edgy" | "anime" | "cute" | "professional";
 
 type Quest = {
-  id: number;
+  id: string | number;
   title: string;
   project: string;
   goal: string;
@@ -60,6 +60,9 @@ type Quest = {
   focus?: boolean;
   top3?: boolean;
   isCoop?: boolean;
+  coopQuestId?: string;
+  coopCreatorHandle?: string;
+  coopParticipantStatus?: string;
   address?: string;
   googleMapsUrl?: string;
   inviteHandles?: string;
@@ -105,6 +108,22 @@ type FriendProfile = {
   tag: string | null;
   image: string | null;
   avatarUrl: string | null;
+};
+
+type ApiCoopQuest = {
+  id: string;
+  title: string;
+  description: string;
+  activityDate: string;
+  address: string;
+  googleMapsUrl: string;
+  status: string;
+  currentUserParticipantStatus?: string | null;
+  creator: { username: string | null; tag: string | null; name: string | null };
+  participants: Array<{
+    status: string;
+    user: { username: string | null; tag: string | null; name: string | null };
+  }>;
 };
 
 const areas: Area[] = ["Career", "Fitness", "Learning", "Money", "Business", "Relationships", "Health", "Creativity"];
@@ -320,6 +339,47 @@ function googleBusinessProfileUrl(quest: Quest) {
   if (quest.googleMapsUrl && looksLikeUrl(quest.googleMapsUrl)) return quest.googleMapsUrl;
   if (quest.address && looksLikeUrl(quest.address)) return quest.address;
   return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(mapSearchQuery(quest))}`;
+}
+
+function activityDateFromQuest(quest: Pick<Quest, "dueDate" | "scheduledBlock">) {
+  const time = quest.scheduledBlock || "09:00";
+  return new Date(`${quest.dueDate}T${time}:00`).toISOString();
+}
+
+function coopQuestToPlannerQuest(quest: ApiCoopQuest): Quest {
+  const date = new Date(quest.activityDate);
+  const dueDate = toDateKey(date);
+  const scheduledBlock = `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
+  const creatorHandle = quest.creator.username && quest.creator.tag ? `${quest.creator.username}#${quest.creator.tag}` : quest.creator.name ?? "Co-op creator";
+  const inviteHandles = quest.participants
+    .map((participant) => participant.user.username && participant.user.tag ? `${participant.user.username}#${participant.user.tag}` : participant.user.name)
+    .filter(Boolean)
+    .join(", ");
+
+  return {
+    id: `coop-${quest.id}`,
+    coopQuestId: quest.id,
+    title: quest.title,
+    project: "COOP Quest",
+    goal: "Show up together",
+    area: "Relationships",
+    type: "Normal task",
+    energy: 2,
+    hours: 1,
+    dueDate,
+    priority: "High",
+    status: quest.status === "COMPLETED" ? "done" : "active",
+    bossDamage: 10,
+    createdAt: quest.activityDate,
+    scheduledBlock,
+    notes: quest.description,
+    isCoop: true,
+    coopCreatorHandle: creatorHandle,
+    coopParticipantStatus: quest.currentUserParticipantStatus ?? undefined,
+    address: quest.address,
+    googleMapsUrl: quest.googleMapsUrl,
+    inviteHandles,
+  };
 }
 
 function makeSeedState(): PlannerState {
@@ -538,11 +598,11 @@ export default function Home({ accountId }: { accountId: string }) {
   const [removedQuest, setRemovedQuest] = useState<Quest | null>(null);
   const [showIntro, setShowIntro] = useState(() => (typeof window === "undefined" ? false : window.sessionStorage.getItem("level-up-show-intro") === "1"));
   const [hasLoaded, setHasLoaded] = useState(false);
-  const [editingQuestId, setEditingQuestId] = useState<number | null>(null);
+  const [editingQuestId, setEditingQuestId] = useState<Quest["id"] | null>(null);
   const [showInvitePicker, setShowInvitePicker] = useState(false);
   const [friendSearch, setFriendSearch] = useState("");
   const [friends, setFriends] = useState<FriendProfile[]>([]);
-  const [selectedCoopQuestId, setSelectedCoopQuestId] = useState<number | null>(null);
+  const [selectedCoopQuestId, setSelectedCoopQuestId] = useState<Quest["id"] | null>(null);
   const [draft, setDraft] = useState<DraftQuest>(() => ({
     title: "",
     project: "Website homepage",
@@ -621,6 +681,33 @@ export default function Home({ accountId }: { accountId: string }) {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    if (!hasLoaded) return;
+    let cancelled = false;
+    async function loadSharedCoopQuests() {
+      try {
+        const response = await fetch("/api/coop-quests");
+        const payload = await response.json();
+        if (!response.ok || cancelled) return;
+        const sharedQuests = ((payload.quests ?? []) as ApiCoopQuest[]).map(coopQuestToPlannerQuest);
+        const sharedIds = new Set(sharedQuests.map((quest) => quest.coopQuestId));
+        setState((current) => ({
+          ...current,
+          quests: [
+            ...current.quests.filter((quest) => !quest.coopQuestId || !sharedIds.has(quest.coopQuestId)),
+            ...sharedQuests,
+          ],
+        }));
+      } catch {
+        if (!cancelled) setToast("Shared co-op quests could not sync yet.");
+      }
+    }
+    void loadSharedCoopQuests();
+    return () => {
+      cancelled = true;
+    };
+  }, [hasLoaded]);
 
   useEffect(() => {
     if (!hasLoaded) return;
@@ -711,7 +798,7 @@ export default function Home({ accountId }: { accountId: string }) {
     setState((current) => ({ ...current, ...patch }));
   }
 
-  function updateQuest(id: number, patch: Partial<Quest>) {
+  function updateQuest(id: Quest["id"], patch: Partial<Quest>) {
     patchState({ quests: state.quests.map((quest) => (quest.id === id ? { ...quest, ...patch } : quest)) });
   }
 
@@ -752,7 +839,46 @@ export default function Home({ accountId }: { accountId: string }) {
     setToast(quest.top3 ? "Removed from Top 3." : "Locked into today's Top 3.");
   }
 
-  function addQuest(event: FormEvent<HTMLFormElement>) {
+  async function syncCoopQuest(quest: Quest) {
+    if (!quest.isCoop) return quest;
+    const handles = (quest.inviteHandles ?? "").split(",").map((item) => item.trim()).filter(Boolean);
+    const response = await fetch("/api/coop-quests", {
+      method: quest.coopQuestId ? "PATCH" : "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        id: quest.coopQuestId,
+        title: quest.title,
+        description: quest.notes ?? "",
+        activityDate: activityDateFromQuest(quest),
+        address: quest.address ?? "",
+        googleMapsUrl: quest.googleMapsUrl ?? "",
+        handles,
+      }),
+    });
+    const payload = await response.json();
+    if (!response.ok) {
+      setToast(payload.error ?? "Co-op invite sync failed.");
+      return quest;
+    }
+    return { ...quest, coopQuestId: payload.quest.id };
+  }
+
+  async function refreshSharedCoopQuests() {
+    const response = await fetch("/api/coop-quests");
+    const payload = await response.json();
+    if (!response.ok) return;
+    const sharedQuests = ((payload.quests ?? []) as ApiCoopQuest[]).map(coopQuestToPlannerQuest);
+    const sharedIds = new Set(sharedQuests.map((quest) => quest.coopQuestId));
+    setState((current) => ({
+      ...current,
+      quests: [
+        ...current.quests.filter((quest) => !quest.coopQuestId || !sharedIds.has(quest.coopQuestId)),
+        ...sharedQuests,
+      ],
+    }));
+  }
+
+  async function addQuest(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!draft.title.trim()) return;
     const type = draft.type;
@@ -780,15 +906,22 @@ export default function Home({ accountId }: { accountId: string }) {
     const existingQuest = editingQuestId ? state.quests.find((quest) => quest.id === editingQuestId) : null;
     const nextQuest: Quest = existingQuest
       ? { ...existingQuest, ...questPatch }
-      : { id: Date.now(), createdAt: new Date().toISOString(), ...questPatch };
-    patchState({ quests: editingQuestId ? state.quests.map((quest) => (quest.id === editingQuestId ? nextQuest : quest)) : [nextQuest, ...state.quests] });
+      : { id: `local-${Date.now()}`, createdAt: new Date().toISOString(), ...questPatch };
+    const syncedQuest = await syncCoopQuest(nextQuest);
+    patchState({ quests: editingQuestId ? state.quests.map((quest) => (quest.id === editingQuestId ? syncedQuest : quest)) : [syncedQuest, ...state.quests] });
+    if (syncedQuest.isCoop) void refreshSharedCoopQuests();
     setDraft((current) => ({ ...current, title: "", notes: "", address: "", googleMapsUrl: "", inviteHandles: "" }));
     setEditingQuestId(null);
     setRemovedQuest(null);
-    setToast(editingQuestId ? "Quest updated." : nextQuest.isCoop ? "Co-op quest added to the planner calendar." : isPast(nextQuest.dueDate, today) ? "Quest added to Calendar history." : "Quest added to the planner.");
+    setToast(editingQuestId ? "Quest updated." : syncedQuest.isCoop ? "Co-op invite sent. Friends will see it in COOP after accepting/refreshing." : isPast(syncedQuest.dueDate, today) ? "Quest added to Calendar history." : "Quest added to the planner.");
   }
 
   function editQuest(quest: Quest) {
+    if (quest.coopParticipantStatus) {
+      setActiveTab("coop");
+      setToast("Only the co-op creator can edit invites or location.");
+      return;
+    }
     setActiveTab("planner");
     setEditingQuestId(quest.id);
     setDraft({
@@ -832,6 +965,27 @@ export default function Home({ accountId }: { accountId: string }) {
     patchState({ quests: state.quests.filter((item) => item.id !== quest.id) });
     setRemovedQuest(quest);
     setToast(`Removed "${quest.title}".`);
+  }
+
+  async function respondToCoopInvite(quest: Quest, action: "accept" | "decline") {
+    if (!quest.coopQuestId) return;
+    const response = await fetch("/api/coop-quests", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: quest.coopQuestId, action }),
+    });
+    const payload = await response.json();
+    if (!response.ok) {
+      setToast(payload.error ?? "Could not update co-op invite.");
+      return;
+    }
+    if (action === "decline") {
+      patchState({ quests: state.quests.filter((item) => item.id !== quest.id) });
+      setToast("Co-op invite declined.");
+      return;
+    }
+    updateQuest(quest.id, { coopParticipantStatus: "ACCEPTED" });
+    setToast("Co-op invite accepted.");
   }
 
   function undoRemoveQuest() {
@@ -1264,11 +1418,19 @@ export default function Home({ accountId }: { accountId: string }) {
                           </div>
                           <p className="mt-1 text-sm font-bold" style={{ color: "var(--muted)" }}>{quest.scheduledBlock || "No time block"} / {quest.project}</p>
                           {quest.address ? <p className="mt-3 text-sm font-bold">{quest.address}</p> : null}
+                          {quest.coopCreatorHandle ? <p className="mt-2 text-sm" style={{ color: "var(--muted)" }}>Created by: {quest.coopCreatorHandle}</p> : null}
                           {quest.inviteHandles ? <p className="mt-2 text-sm" style={{ color: "var(--muted)" }}>Invited: {quest.inviteHandles}</p> : <p className="mt-2 text-sm" style={{ color: "var(--muted)" }}>No friends invited yet.</p>}
                           <div className="mt-3 flex flex-wrap gap-2">
                             <span className="rounded-md border px-2 py-1 text-xs font-black" style={{ borderColor: "var(--line)" }}>{quest.energy} energy</span>
                             <span className="rounded-md border px-2 py-1 text-xs font-black" style={{ borderColor: "var(--line)" }}>{quest.priority}</span>
-                            <button type="button" onClick={(event) => { event.stopPropagation(); editQuest(quest); }} className="rounded-md px-2 py-1 text-xs font-black text-white" style={{ background: "var(--inverse)" }}>Edit invites</button>
+                            {quest.coopParticipantStatus ? <span className="rounded-md border px-2 py-1 text-xs font-black" style={{ borderColor: "var(--line)" }}>{quest.coopParticipantStatus.toLowerCase()}</span> : null}
+                            {quest.coopParticipantStatus === "INVITED" ? (
+                              <>
+                                <button type="button" onClick={(event) => { event.stopPropagation(); respondToCoopInvite(quest, "accept"); }} className="rounded-md px-2 py-1 text-xs font-black text-white" style={{ background: "var(--accent2)" }}>Accept</button>
+                                <button type="button" onClick={(event) => { event.stopPropagation(); respondToCoopInvite(quest, "decline"); }} className="rounded-md px-2 py-1 text-xs font-black text-white" style={{ background: "var(--inverse)" }}>Decline</button>
+                              </>
+                            ) : null}
+                            {!quest.coopParticipantStatus ? <button type="button" onClick={(event) => { event.stopPropagation(); editQuest(quest); }} className="rounded-md px-2 py-1 text-xs font-black text-white" style={{ background: "var(--inverse)" }}>Edit invites</button> : null}
                           </div>
                         </article>
                       );

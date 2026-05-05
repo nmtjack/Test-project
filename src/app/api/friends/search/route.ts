@@ -22,5 +22,10 @@ export async function GET(request: NextRequest) {
     take: 12,
   });
 
-  return NextResponse.json({ users });
+  const seen = new Set<string>();
+  return NextResponse.json({ users: users.filter((match) => {
+    if (seen.has(match.id)) return false;
+    seen.add(match.id);
+    return true;
+  }) });
 }
