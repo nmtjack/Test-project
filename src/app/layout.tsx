@@ -2,8 +2,8 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "NVIDIA AI Semiconductor Dashboard",
-  description: "Executive innovation performance dashboard and ROI calculator.",
+  title: "LifeQuest Planner",
+  description: "An execution-focused planner app with XP, streaks, boss fights, and skill progression.",
 };
 
 export default function RootLayout({

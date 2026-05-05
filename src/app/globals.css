@@ -3,14 +3,26 @@
 @tailwind utilities;
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #f7f3ea;
+  --foreground: #1c1917;
+  --maison-bg: #ffffff;
+  --maison-fg: #000000;
+  --maison-muted: #6f6f6f;
+  --maison-line: #d8d8d8;
+  --maison-panel: #ffffff;
+  --maison-subtle: #f5f5f3;
+  --maison-inverse: #000000;
+  --maison-inverse-fg: #ffffff;
+  --maison-radius: 6px;
+  --maison-space: 1;
+  --maison-headline: Georgia, "Times New Roman", serif;
+  --maison-body: Arial, Helvetica, sans-serif;
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--maison-body);
 }
 
 * {
@@ -18,5 +30,79 @@ body {
 }
 
 html {
-  background: #f8fafc;
+  background: var(--maison-bg);
+  scroll-behavior: smooth;
+}
+
+button,
+input,
+select {
+  font: inherit;
+}
+
+::selection {
+  background: #f6c445;
+  color: #1c1917;
+}
+
+.maison-shell {
+  background: var(--maison-bg);
+  color: var(--maison-fg);
+  font-family: var(--maison-body);
+}
+
+.maison-title {
+  font-family: var(--maison-headline);
+  letter-spacing: 0;
+}
+
+.maison-panel {
+  background: var(--maison-panel);
+  border: 1px solid var(--maison-line);
+  border-radius: var(--maison-radius);
+  box-shadow: none;
+}
+
+.maison-button-primary {
+  background: var(--maison-inverse);
+  color: var(--maison-inverse-fg);
+  border: 1px solid var(--maison-inverse);
+  border-radius: var(--maison-radius);
+  transition: opacity 180ms ease, transform 180ms ease;
+}
+
+.maison-button-primary:hover {
+  opacity: 0.86;
+  transform: translateY(-1px);
+}
+
+.maison-button-secondary {
+  background: transparent;
+  color: var(--maison-fg);
+  border: 1px solid var(--maison-line);
+  border-radius: var(--maison-radius);
+  transition: opacity 180ms ease, transform 180ms ease;
+}
+
+.maison-button-secondary:hover {
+  opacity: 0.72;
+  transform: translateY(-1px);
+}
+
+.maison-eyebrow {
+  color: var(--maison-muted);
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.maison-subtle {
+  background: var(--maison-subtle);
+}
+
+.maison-muted {
+  color: var(--maison-muted);
+}
+
+.maison-image {
+  filter: grayscale(1) contrast(1.08);
 }
